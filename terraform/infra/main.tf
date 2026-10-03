@@ -102,6 +102,10 @@ resource "aws_security_group" "vpc_endpoints" {
     protocol    = "-1"
     cidr_blocks = ["0.0.0.0/0"]
   }
+
+  tags = {
+    Name = "${var.project_name}-vpc-endpoints-sg"
+  }
 }
 
 resource "aws_vpc_endpoint" "ecr_api" {
