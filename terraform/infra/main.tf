@@ -205,7 +205,13 @@ resource "aws_eks_cluster" "eks_cluster" {
   role_arn = aws_iam_role.eks_cluster.arn
 
   vpc_config {
-    subnet_ids = aws_subnet.private[*].id
+    subnet_ids              = aws_subnet.private[*].id
+    endpoint_private_access = true
+  }
+
+  access_config {
+    authentication_mode                         = "API_AND_CONFIG_MAP"
+    bootstrap_cluster_creator_admin_permissions = true
   }
 }
 
@@ -303,18 +309,18 @@ resource "aws_eks_addon" "coredns" {
   depends_on = [aws_eks_fargate_profile.fargate_profile]
 }
 
-resource "aws_db_subnet_group" "aurora" {
-  name       = "${var.project_name}-aurora-subnet-group"
+resource "aws_db_subnet_group" "db" {
+  name       = "${var.project_name}-db-subnet-group"
   subnet_ids = aws_subnet.private[*].id
 
   tags = {
-    Name = "${var.project_name}-aurora-subnet-group"
+    Name = "${var.project_name}-db-subnet-group"
   }
 }
 
-resource "aws_security_group" "aurora" {
-  name        = "${var.project_name}-aurora-sg"
-  description = "Security group for Aurora database"
+resource "aws_security_group" "db" {
+  name        = "${var.project_name}-db-sg"
+  description = "Security group for RDS database"
   vpc_id      = aws_vpc.main.id
 
   ingress {
@@ -332,103 +338,30 @@ resource "aws_security_group" "aurora" {
   }
 
   tags = {
-    Name = "${var.project_name}-aurora-sg"
+    Name = "${var.project_name}-db-sg"
   }
 }
 
-resource "aws_rds_cluster" "aurora" {
-  cluster_identifier          = "${var.project_name}-aurora-cluster"
-  engine                      = "aurora-postgresql"
-  engine_mode                 = "provisioned"
-  database_name               = "orderflow"
-  master_username             = "orderflow_admin"
+resource "aws_db_instance" "db" {
+  identifier     = "${var.project_name}-db"
+  engine         = "postgres"
+  instance_class = "db.t3.micro"
+
+  allocated_storage           = 20
+  db_name                     = "orderflow"
+  username                    = "orderflow_admin"
   manage_master_user_password = true
 
-  db_subnet_group_name   = aws_db_subnet_group.aurora.name
-  vpc_security_group_ids = [aws_security_group.aurora.id]
+  db_subnet_group_name   = aws_db_subnet_group.db.name
+  vpc_security_group_ids = [aws_security_group.db.id]
 
+  publicly_accessible = false
   skip_final_snapshot = true
+  multi_az            = false
 
   tags = {
-    Name = "${var.project_name}-aurora-cluster"
+    Name = "${var.project_name}-db"
   }
-}
-
-resource "aws_rds_cluster_instance" "aurora" {
-  identifier         = "${var.project_name}-aurora-instance-1"
-  cluster_identifier = aws_rds_cluster.aurora.id
-  instance_class     = "db.t4g.medium"
-  engine             = aws_rds_cluster.aurora.engine
-  engine_version     = aws_rds_cluster.aurora.engine_version
-}
-
-resource "aws_iam_role" "rds_proxy" {
-  name = "${var.project_name}-rds-proxy-role"
-
-  assume_role_policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Effect = "Allow"
-        Principal = {
-          Service = "rds.amazonaws.com"
-        }
-        Action = "sts:AssumeRole"
-      }
-    ]
-  })
-
-  tags = {
-    Name = "${var.project_name}-rds-proxy-role"
-  }
-}
-
-resource "aws_iam_role_policy" "rds_proxy_secrets" {
-  name = "${var.project_name}-rds-proxy-secrets-policy"
-  role = aws_iam_role.rds_proxy.id
-
-  policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Effect   = "Allow"
-        Action   = "secretsmanager:GetSecretValue"
-        Resource = aws_rds_cluster.aurora.master_user_secret[0].secret_arn
-      }
-    ]
-  })
-}
-
-resource "aws_db_proxy" "aurora" {
-  name                   = "${var.project_name}-aurora-proxy"
-  engine_family          = "POSTGRESQL"
-  role_arn               = aws_iam_role.rds_proxy.arn
-  vpc_subnet_ids         = aws_subnet.private[*].id
-  vpc_security_group_ids = [aws_security_group.aurora.id]
-
-  auth {
-    auth_scheme = "SECRETS"
-    iam_auth    = "DISABLED"
-    secret_arn  = aws_rds_cluster.aurora.master_user_secret[0].secret_arn
-  }
-
-  tags = {
-    Name = "${var.project_name}-aurora-proxy"
-  }
-}
-
-resource "aws_db_proxy_default_target_group" "aurora" {
-  db_proxy_name = aws_db_proxy.aurora.name
-
-  connection_pool_config {
-    max_connections_percent = 100
-  }
-}
-
-resource "aws_db_proxy_target" "aurora" {
-  db_proxy_name         = aws_db_proxy.aurora.name
-  target_group_name     = aws_db_proxy_default_target_group.aurora.name
-  db_cluster_identifier = aws_rds_cluster.aurora.cluster_identifier
 }
 
 resource "aws_dynamodb_table" "processed_events" {
