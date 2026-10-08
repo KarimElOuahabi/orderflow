@@ -383,3 +383,111 @@ resource "aws_dynamodb_table" "processed_events" {
     Name = "${var.project_name}-processed-events"
   }
 }
+
+resource "aws_cloudwatch_event_bus" "orders" {
+  name = "${var.project_name}-orders-bus"
+
+  tags = {
+    Name = "${var.project_name}-orders-bus"
+  }
+}
+
+resource "aws_sns_topic" "order_events" {
+  name = "${var.project_name}-order-events"
+
+  tags = {
+    Name = "${var.project_name}-order-events"
+  }
+}
+
+resource "aws_sqs_queue" "fulfillment_dlq" {
+  name                      = "${var.project_name}-fulfillment-dlq"
+  message_retention_seconds = 1209600
+
+  tags = {
+    Name = "${var.project_name}-fulfillment-dlq"
+  }
+}
+
+resource "aws_sqs_queue" "fulfillment" {
+  name                       = "${var.project_name}-fulfillment-queue"
+  visibility_timeout_seconds = 60
+
+  redrive_policy = jsonencode({
+    deadLetterTargetArn = aws_sqs_queue.fulfillment_dlq.arn
+    maxReceiveCount     = 5
+  })
+
+  tags = {
+    Name = "${var.project_name}-fulfillment-queue"
+  }
+}
+
+resource "aws_sqs_queue_policy" "fulfillment" {
+  queue_url = aws_sqs_queue.fulfillment.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Principal = {
+          Service = "sns.amazonaws.com"
+        }
+        Action   = "sqs:SendMessage"
+        Resource = aws_sqs_queue.fulfillment.arn
+        Condition = {
+          ArnEquals = {
+            "aws:SourceArn" = aws_sns_topic.order_events.arn
+          }
+        }
+      }
+    ]
+  })
+}
+
+resource "aws_sns_topic_subscription" "fulfillment" {
+  topic_arn            = aws_sns_topic.order_events.arn
+  protocol             = "sqs"
+  endpoint             = aws_sqs_queue.fulfillment.arn
+  raw_message_delivery = true
+}
+
+resource "aws_cloudwatch_event_rule" "order_created" {
+  name           = "${var.project_name}-order-created"
+  event_bus_name = aws_cloudwatch_event_bus.orders.name
+
+  event_pattern = jsonencode({
+    source        = ["orderflow.order-service"]
+    "detail-type" = ["OrderCreated"]
+  })
+}
+
+resource "aws_sns_topic_policy" "order_events" {
+  arn = aws_sns_topic.order_events.arn
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Principal = {
+          Service = "events.amazonaws.com"
+        }
+        Action   = "sns:Publish"
+        Resource = aws_sns_topic.order_events.arn
+        Condition = {
+          ArnEquals = {
+            "aws:SourceArn" = aws_cloudwatch_event_rule.order_created.arn
+          }
+        }
+      }
+    ]
+  })
+}
+
+resource "aws_cloudwatch_event_target" "order_created_to_sns" {
+  rule           = aws_cloudwatch_event_rule.order_created.name
+  event_bus_name = aws_cloudwatch_event_bus.orders.name
+  arn            = aws_sns_topic.order_events.arn
+}
