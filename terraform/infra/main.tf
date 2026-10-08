@@ -302,3 +302,151 @@ resource "aws_eks_addon" "coredns" {
 
   depends_on = [aws_eks_fargate_profile.fargate_profile]
 }
+
+resource "aws_db_subnet_group" "aurora" {
+  name       = "${var.project_name}-aurora-subnet-group"
+  subnet_ids = aws_subnet.private[*].id
+
+  tags = {
+    Name = "${var.project_name}-aurora-subnet-group"
+  }
+}
+
+resource "aws_security_group" "aurora" {
+  name        = "${var.project_name}-aurora-sg"
+  description = "Security group for Aurora database"
+  vpc_id      = aws_vpc.main.id
+
+  ingress {
+    from_port       = 5432
+    to_port         = 5432
+    protocol        = "tcp"
+    security_groups = [aws_eks_cluster.eks_cluster.vpc_config[0].cluster_security_group_id]
+  }
+
+  egress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  tags = {
+    Name = "${var.project_name}-aurora-sg"
+  }
+}
+
+resource "aws_rds_cluster" "aurora" {
+  cluster_identifier          = "${var.project_name}-aurora-cluster"
+  engine                      = "aurora-postgresql"
+  engine_mode                 = "provisioned"
+  database_name               = "orderflow"
+  master_username             = "orderflow_admin"
+  manage_master_user_password = true
+
+  db_subnet_group_name   = aws_db_subnet_group.aurora.name
+  vpc_security_group_ids = [aws_security_group.aurora.id]
+
+  skip_final_snapshot = true
+
+  tags = {
+    Name = "${var.project_name}-aurora-cluster"
+  }
+}
+
+resource "aws_rds_cluster_instance" "aurora" {
+  identifier         = "${var.project_name}-aurora-instance-1"
+  cluster_identifier = aws_rds_cluster.aurora.id
+  instance_class     = "db.t4g.medium"
+  engine             = aws_rds_cluster.aurora.engine
+  engine_version     = aws_rds_cluster.aurora.engine_version
+}
+
+resource "aws_iam_role" "rds_proxy" {
+  name = "${var.project_name}-rds-proxy-role"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Principal = {
+          Service = "rds.amazonaws.com"
+        }
+        Action = "sts:AssumeRole"
+      }
+    ]
+  })
+
+  tags = {
+    Name = "${var.project_name}-rds-proxy-role"
+  }
+}
+
+resource "aws_iam_role_policy" "rds_proxy_secrets" {
+  name = "${var.project_name}-rds-proxy-secrets-policy"
+  role = aws_iam_role.rds_proxy.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect   = "Allow"
+        Action   = "secretsmanager:GetSecretValue"
+        Resource = aws_rds_cluster.aurora.master_user_secret[0].secret_arn
+      }
+    ]
+  })
+}
+
+resource "aws_db_proxy" "aurora" {
+  name                   = "${var.project_name}-aurora-proxy"
+  engine_family          = "POSTGRESQL"
+  role_arn               = aws_iam_role.rds_proxy.arn
+  vpc_subnet_ids         = aws_subnet.private[*].id
+  vpc_security_group_ids = [aws_security_group.aurora.id]
+
+  auth {
+    auth_scheme = "SECRETS"
+    iam_auth    = "DISABLED"
+    secret_arn  = aws_rds_cluster.aurora.master_user_secret[0].secret_arn
+  }
+
+  tags = {
+    Name = "${var.project_name}-aurora-proxy"
+  }
+}
+
+resource "aws_db_proxy_default_target_group" "aurora" {
+  db_proxy_name = aws_db_proxy.aurora.name
+
+  connection_pool_config {
+    max_connections_percent = 100
+  }
+}
+
+resource "aws_db_proxy_target" "aurora" {
+  db_proxy_name         = aws_db_proxy.aurora.name
+  target_group_name     = aws_db_proxy_default_target_group.aurora.name
+  db_cluster_identifier = aws_rds_cluster.aurora.cluster_identifier
+}
+
+resource "aws_dynamodb_table" "processed_events" {
+  name         = "${var.project_name}-processed-events"
+  billing_mode = "PAY_PER_REQUEST"
+  hash_key     = "event_id"
+
+  attribute {
+    name = "event_id"
+    type = "S"
+  }
+
+  ttl {
+    attribute_name = "expires_at"
+    enabled        = true
+  }
+
+  tags = {
+    Name = "${var.project_name}-processed-events"
+  }
+}
