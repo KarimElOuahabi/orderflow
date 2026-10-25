@@ -5,14 +5,16 @@ import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 
+import com.orderflow.order_service.domain.InvalidOrderException;
+
 import java.util.Map;
 
 @RestControllerAdvice
 public class ApiExceptionHandler {
 
-    @ExceptionHandler(IllegalArgumentException.class)
+    @ExceptionHandler(InvalidOrderException.class)
     @ResponseStatus(HttpStatus.BAD_REQUEST)
-    public Map<String, String> handleBadRequest(IllegalArgumentException ex) {
+    public Map<String, String> handleBadRequest(InvalidOrderException ex) {
         return Map.of("error", ex.getMessage());
     }
 }

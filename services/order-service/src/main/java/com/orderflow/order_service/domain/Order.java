@@ -13,7 +13,7 @@ public class Order {
     private final Instant createdAt;
 
     public Order(UUID id, String customerId, BigDecimal totalAmount,
-                 OrderStatus status, Instant createdAt) {
+            OrderStatus status, Instant createdAt) {
         this.id = id;
         this.customerId = customerId;
         this.totalAmount = totalAmount;
@@ -23,15 +23,32 @@ public class Order {
 
     public static Order create(String customerId, BigDecimal totalAmount) {
         if (totalAmount == null || totalAmount.signum() <= 0) {
-            throw new IllegalArgumentException("Order total must be positive");
+            throw new InvalidOrderTotalException("Order total must be positive");
+        }
+        if (customerId == null || customerId.isBlank()) {
+            throw new InvalidCustomerIdException("Order customer ID must not be empty");
         }
         return new Order(UUID.randomUUID(), customerId, totalAmount,
                 OrderStatus.CREATED, Instant.now());
     }
 
-    public UUID getId() { return id; }
-    public String getCustomerId() { return customerId; }
-    public BigDecimal getTotalAmount() { return totalAmount; }
-    public OrderStatus getStatus() { return status; }
-    public Instant getCreatedAt() { return createdAt; }
+    public UUID getId() {
+        return id;
+    }
+
+    public String getCustomerId() {
+        return customerId;
+    }
+
+    public BigDecimal getTotalAmount() {
+        return totalAmount;
+    }
+
+    public OrderStatus getStatus() {
+        return status;
+    }
+
+    public Instant getCreatedAt() {
+        return createdAt;
+    }
 }
