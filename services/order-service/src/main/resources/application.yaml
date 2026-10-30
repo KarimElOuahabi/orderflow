@@ -2,7 +2,7 @@ spring:
   application:
     name: order-service
   datasource:
-    url: jdbc:postgresql://localhost:5432/orderflow
+    url: jdbc:postgresql://localhost:5434/orderflow
     username: orderflow_admin
     password: ${DATABASE_PASSWORD}
     driver-class-name: org.postgresql.Driver
