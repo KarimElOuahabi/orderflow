@@ -2,8 +2,8 @@ package com.orderflow.order_service.application;
 
 import com.orderflow.order_service.application.port.in.CreateOrderUseCase;
 import com.orderflow.order_service.application.port.out.OrderRepository;
+import com.orderflow.order_service.application.port.out.OutboxPort;
 import com.orderflow.order_service.domain.Order;
-import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -12,11 +12,11 @@ import java.math.BigDecimal;
 @Service
 public class OrderService implements CreateOrderUseCase {
     private final OrderRepository orderRepository;
-    private final ApplicationEventPublisher applicationEvents;
+    private final OutboxPort outbox;
 
-    public OrderService(OrderRepository orderRepository, ApplicationEventPublisher applicationEvents) {
+    public OrderService(OrderRepository orderRepository, OutboxPort outbox) {
         this.orderRepository = orderRepository;
-        this.applicationEvents = applicationEvents;
+        this.outbox = outbox;
     }
 
     @Override
@@ -24,7 +24,7 @@ public class OrderService implements CreateOrderUseCase {
     public Order createOrder(String customerId, BigDecimal orderAmount) {
         Order order = Order.create(customerId, orderAmount);
         Order saved = orderRepository.save(order);
-        applicationEvents.publishEvent(new OrderCreatedEvent(saved));
+        outbox.saveOrderCreated(saved);
         return saved;
     }
 }

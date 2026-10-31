@@ -1,6 +1,7 @@
 package com.orderflow.order_service.application;
 
 import com.orderflow.order_service.application.port.out.OrderRepository;
+import com.orderflow.order_service.application.port.out.OutboxPort;
 import com.orderflow.order_service.domain.InvalidOrderTotalException;
 import com.orderflow.order_service.domain.Order;
 import org.junit.jupiter.api.Test;
@@ -8,7 +9,6 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
-import org.springframework.context.ApplicationEventPublisher;
 
 import java.math.BigDecimal;
 
@@ -26,13 +26,13 @@ class OrderServiceTest {
     OrderRepository orderRepository;
 
     @Mock
-    ApplicationEventPublisher applicationEvents;
+    OutboxPort outbox;
 
     @InjectMocks
     OrderService orderService;
 
     @Test
-    void createOrder_savesOrder_andPublishesEvent() {
+    void createOrder_savesOrder_andWritesOutboxEvent() {
         when(orderRepository.save(any(Order.class))).thenAnswer(i -> i.getArgument(0));
 
         Order result = orderService.createOrder("c-01", new BigDecimal("100.00"));
@@ -40,16 +40,16 @@ class OrderServiceTest {
         assertEquals("c-01", result.getCustomerId());
         verify(orderRepository).save(any(Order.class));
         System.out.println("1 - Order saved successfully");
-        verify(applicationEvents).publishEvent(any(OrderCreatedEvent.class));
-        System.out.println("2 - OrderCreatedEvent published successfully");
+        verify(outbox).saveOrderCreated(result);
+        System.out.println("2 - OrderCreated event written to the outbox");
     }
 
     @Test
-    void createOrder_invalidTotal_savesNothing_andPublishesNothing() {
+    void createOrder_invalidTotal_savesNothing_andWritesNothing() {
         assertThrows(InvalidOrderTotalException.class,
                 () -> orderService.createOrder("c-01", new BigDecimal("-5")));
 
-        verifyNoInteractions(orderRepository, applicationEvents);
-        System.out.println("4 - Invalid order rejected: nothing saved, nothing published");
+        verifyNoInteractions(orderRepository, outbox);
+        System.out.println("3 - Invalid order rejected: nothing saved, nothing in the outbox");
     }
 }
